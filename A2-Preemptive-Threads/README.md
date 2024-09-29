@@ -12,6 +12,51 @@ The previous user-level thread package utilizes thread_yield causing control to 
 
 ## Timer Signals
 
+The code in the files **interrupt.h** and **interrupt.c** explained below:
+
+
+### void register_interrupt_handler(bool verbose):
+This function installs a timer signal handler in the calling program using the sigaction system call. When a timer signal fires, the function interrupt_handler in the interrupt.c file is invoked. With the verbose flag, a message is printed when the handler function runs.
+
+### bool interrupts_set(bool enable):
+This function enables timer signals when enable is 1, and disables (or blocks) them when enabled is 0. We call the current enabled or disabled state of the signal the signal state. This function also returns whether the signals were previously enabled or not (i.e., the previous signal state). Notice that the operating system ensures that these two operations (reading previous state, and updating it) are performed atomically when the sigprocmask system call is issued. This function is used to disable signals when running any code that is a critical section (i.e., code that accesses data that is shared by multiple threads).
+
+Why does this function return the previous signal state? The reason is that it allows "nesting" calls to this function. The typical usage of this function is as follows:
+``` c
+fn() {
+    /* disable signals, store the previous signal state in "enabled" */
+    int enabled = interrupts_set(false);
+    /* critical section */
+    interrupts_set(enabled);
+}
+```
+\
+The first call to interrupts_set disables signals. The second call restores the signal state to its previous state, i.e., the signal state before the first call to interrupts_set, rather than unconditionally enabling signals. This is useful because the caller of the function fn may be expecting signals to remain disabled after the function fn finishes executing. For example:
+``` c
+fn_caller() {
+    int enabled = interrupts_set(false);
+    /* begin critical section */
+    fn();
+    /* code expects signals are still disabled */
+    ...
+    /* end critical section */
+    interrupts_set(enabled);
+}
+```
+\
+Notice how signal disabling and enabling are performed in "stack" order, so that the signal state remains disabled after fn returns.
+\
+The functions interrupts_on and interrupts_off are simple wrappers for the interrupt_set function.
+
+### bool interrupts_enabled():
+This function returns whether signals are enabled or disabled currently. You can use this function to check (i.e., assert) whether your assumptions about the signal state are correct.
+
+### void interrupts_quiet():
+This function turns off printing signal handler messages.
+
+### void interrupts_loud():
+This function turns on printing signal handler messages.
+
 ## Preemptive Threading
 
 Signals can be sent to the process at any time, even when a thread is in the middle of a thread_yield, thread_create, or thread_exit call. It is a very bad idea to allow multiple threads to access shared variables (such as the ready queue) at the same time. You should therefore ensure mutual exclusion i.e., only one thread can be in a critical section (accessing the shared variables) in your thread library at a time.
